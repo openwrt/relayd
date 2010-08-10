@@ -1,4 +1,4 @@
-CFLAGS = -O2 -Wall -Werror -pedantic --std=gnu99
+CFLAGS = -Os -Wall -Werror -pedantic --std=gnu99
 CPPFLAGS = -I.
 LDFLAGS =
 
