@@ -8,7 +8,7 @@ relayd: uloop.o main.o
 	$(CC) -o $@ $^ $(LDFLAGS)
 
 uloop.c: uloop.h
-main.c: uloop.h
+main.c: uloop.h relayd.h list.h
 
 %.o: %.c
 	$(CC) -c $(CPPFLAGS) $(CFLAGS) -o $@ $^
