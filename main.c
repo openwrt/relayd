@@ -16,31 +16,19 @@
  *
  */
 #include <sys/ioctl.h>
-
-#include <arpa/inet.h>
-#include <net/if.h>
-#include <net/ethernet.h>
-#include <netinet/if_ether.h>
-#include <netinet/ip.h>
-#include <netinet/udp.h>
-
-#include <linux/if_packet.h>
-#include <linux/rtnetlink.h>
-#include <linux/neighbour.h>
+#include <sys/socket.h>
 
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <stddef.h>
 #include <stdlib.h>
-#include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <errno.h>
 #include <signal.h>
+#include <string.h>
 
-#include "uloop.h"
-#include "list.h"
 #include "relayd.h"
 
 LIST_HEAD(interfaces);
@@ -50,8 +38,6 @@ static int host_timeout;
 static int inet_sock;
 static int forward_bcast;
 static int forward_dhcp;
-static struct uloop_fd rtnl_sock;
-static unsigned int rtnl_seq, rtnl_dump_seq;
 
 static struct relayd_host *find_host_by_ipaddr(struct relayd_interface *rif, const uint8_t *ipaddr)
 {
@@ -95,69 +81,13 @@ static void add_arp(struct relayd_host *host)
 	ioctl(inet_sock, SIOCSARP, &arp);
 }
 
-static void rtnl_route_set(struct relayd_host *host, bool add)
-{
-	static struct {
-		struct nlmsghdr nl;
-		struct rtmsg rt;
-		struct {
-			struct rtattr rta;
-			uint8_t ipaddr[4];
-		} __packed dst;
-		struct {
-			struct rtattr rta;
-			int ifindex;
-		} __packed dev;
-	} __packed req;
-
-	memset(&req, 0, sizeof(req));
-
-	req.nl.nlmsg_len = sizeof(req);
-	req.rt.rtm_family = AF_INET;
-	req.rt.rtm_dst_len = 32;
-
-	req.dst.rta.rta_type = RTA_DST;
-	req.dst.rta.rta_len = sizeof(req.dst);
-	memcpy(req.dst.ipaddr, host->ipaddr, sizeof(req.dst.ipaddr));
-
-	req.dev.rta.rta_type = RTA_OIF;
-	req.dev.rta.rta_len = sizeof(req.dev);
-	req.dev.ifindex = host->rif->sll.sll_ifindex;
-
-	req.nl.nlmsg_flags = NLM_F_REQUEST;
-	req.rt.rtm_table = RT_TABLE_MAIN;
-	if (add) {
-		req.nl.nlmsg_type = RTM_NEWROUTE;
-		req.nl.nlmsg_flags |= NLM_F_CREATE | NLM_F_REPLACE;
-
-		req.rt.rtm_protocol = RTPROT_BOOT;
-		req.rt.rtm_scope = RT_SCOPE_LINK;
-		req.rt.rtm_type = RTN_UNICAST;
-	} else {
-		req.nl.nlmsg_type = RTM_DELROUTE;
-		req.rt.rtm_scope = RT_SCOPE_NOWHERE;
-	}
-
-	send(rtnl_sock.fd, &req, sizeof(req), 0);
-}
-
-static void add_route(struct relayd_host *host)
-{
-	rtnl_route_set(host, true);
-}
-
-static void del_route(struct relayd_host *host)
-{
-	rtnl_route_set(host, false);
-}
-
 static void del_host(struct relayd_host *host)
 {
 	DPRINTF(1, "%s: deleting host "IP_FMT" ("MAC_FMT")\n", host->rif->ifname,
 		IP_BUF(host->ipaddr), MAC_BUF(host->lladdr));
 
 	if (host->rif->managed)
-		del_route(host);
+		relayd_del_route(host);
 	list_del(&host->list);
 	free(host);
 }
@@ -256,12 +186,12 @@ static struct relayd_host *add_host(struct relayd_interface *rif, const uint8_t 
 
 	add_arp(host);
 	if (rif->managed)
-		add_route(host);
+		relayd_add_route(host);
 
 	return host;
 }
 
-static struct relayd_host *refresh_host(struct relayd_interface *rif, const uint8_t *lladdr, const uint8_t *ipaddr)
+struct relayd_host *relayd_refresh_host(struct relayd_interface *rif, const uint8_t *lladdr, const uint8_t *ipaddr)
 {
 	struct relayd_host *host;
 
@@ -323,7 +253,7 @@ static void recv_arp_request(struct relayd_interface *rif, struct arp_packet *pk
 	if (!memcmp(pkt->arp.arp_spa, "\x00\x00\x00\x00", 4))
 		return;
 
-	refresh_host(rif, pkt->eth.ether_shost, pkt->arp.arp_spa);
+	relayd_refresh_host(rif, pkt->eth.ether_shost, pkt->arp.arp_spa);
 
 	host = find_host_by_ipaddr(NULL, pkt->arp.arp_tpa);
 
@@ -350,7 +280,7 @@ static void recv_arp_reply(struct relayd_interface *rif, struct arp_packet *pkt)
 		MAC_BUF(pkt->eth.ether_shost),
 		IP_BUF(pkt->arp.arp_tpa));
 
-	refresh_host(rif, pkt->arp.arp_sha, pkt->arp.arp_spa);
+	relayd_refresh_host(rif, pkt->arp.arp_sha, pkt->arp.arp_spa);
 
 	if (!memcmp(pkt->arp.arp_tpa, rif->src_ip, 4))
 		return;
@@ -473,7 +403,7 @@ static bool forward_dhcp_packet(struct relayd_interface *rif, void *data, int le
 		return true;
 
 	if (dhcp->op == 2)
-		refresh_host(rif, pkt->eth.ether_shost, (void *) &pkt->iph.saddr);
+		relayd_refresh_host(rif, pkt->eth.ether_shost, (void *) &pkt->iph.saddr);
 
 	DPRINTF(2, "%s: handling DHCP %s\n", rif->ifname, (dhcp->op == 1 ? "request" : "response"));
 
@@ -660,149 +590,6 @@ static int alloc_interface(const char *ifname, bool managed)
 	return 0;
 }
 
-#ifndef NDA_RTA
-#define NDA_RTA(r) \
-    ((struct rtattr*)(((char*)(r)) + NLMSG_ALIGN(sizeof(struct ndmsg))))
-#endif
-
-static void rtnl_parse_newneigh(struct nlmsghdr *h)
-{
-	struct relayd_interface *rif = NULL;
-	struct ndmsg *r = NLMSG_DATA(h);
-	const uint8_t *lladdr = NULL;
-	const uint8_t *ipaddr = NULL;
-	struct rtattr *rta;
-	int len;
-
-	if (r->ndm_family != AF_INET)
-		return;
-
-	list_for_each_entry(rif, &interfaces, list) {
-		if (rif->sll.sll_ifindex == r->ndm_ifindex)
-			goto found_interface;
-	}
-	return;
-
-found_interface:
-	len = h->nlmsg_len - NLMSG_LENGTH(sizeof(*r));
-	for (rta = NDA_RTA(r); RTA_OK(rta, len); rta = RTA_NEXT(rta, len)) {
-		switch(rta->rta_type) {
-		case NDA_LLADDR:
-			lladdr = RTA_DATA(rta);
-			break;
-		case NDA_DST:
-			ipaddr = RTA_DATA(rta);
-			break;
-		default:
-			break;
-		}
-	}
-
-	if (!lladdr || !ipaddr || (r->ndm_state & (NUD_INCOMPLETE|NUD_FAILED)))
-		return;
-
-	if (!memcmp(lladdr, "\x00\x00\x00\x00\x00\x00", ETH_ALEN))
-		return;
-
-	DPRINTF(1, "%s: Found ARP cache entry for host "IP_FMT" ("MAC_FMT")\n",
-		rif->ifname, IP_BUF(ipaddr), MAC_BUF(lladdr));
-	refresh_host(rif, lladdr, ipaddr);
-}
-
-static void rtnl_parse_packet(void *data, int len)
-{
-	struct nlmsghdr *h;
-
-	for (h = data; NLMSG_OK(h, len); h = NLMSG_NEXT(h, len)) {
-		if (h->nlmsg_type == NLMSG_DONE ||
-		    h->nlmsg_type == NLMSG_ERROR)
-			return;
-
-		if (h->nlmsg_seq != rtnl_dump_seq)
-			continue;
-
-		if (h->nlmsg_type == RTM_NEWNEIGH)
-			rtnl_parse_newneigh(h);
-	}
-}
-
-static void rtnl_cb(struct uloop_fd *fd, unsigned int events)
-{
-	struct sockaddr_nl nladdr;
-	static uint8_t buf[16384];
-	struct iovec iov = {
-		.iov_base = buf,
-		.iov_len = sizeof(buf),
-	};
-	struct msghdr msg = {
-		.msg_name = &nladdr,
-		.msg_namelen = sizeof(nladdr),
-		.msg_iov = &iov,
-		.msg_iovlen = 1,
-	};
-
-	do {
-		int len;
-
-		len = recvmsg(rtnl_sock.fd, &msg, 0);
-		if (len < 0) {
-			if (errno == EINTR)
-				continue;
-
-			return;
-		}
-
-		if (!len)
-			break;
-
-		if (nladdr.nl_pid != 0)
-			continue;
-
-		rtnl_parse_packet(buf, len);
-	} while (1);
-}
-
-static int rtnl_init(void)
-{
-	struct sockaddr_nl snl_local;
-	static struct {
-		struct nlmsghdr nlh;
-		struct rtgenmsg g;
-	} req = {
-		.nlh = {
-			.nlmsg_len = sizeof(req),
-			.nlmsg_type = RTM_GETNEIGH,
-			.nlmsg_flags = NLM_F_ROOT|NLM_F_MATCH|NLM_F_REQUEST,
-			.nlmsg_pid = 0,
-		},
-		.g.rtgen_family = AF_INET,
-	};
-
-	rtnl_sock.fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
-	if (rtnl_sock.fd < 0) {
-		perror("socket(AF_NETLINK)");
-		return -1;
-	}
-
-	snl_local.nl_family = AF_NETLINK;
-
-	if (bind(rtnl_sock.fd, (struct sockaddr *) &snl_local, sizeof(struct sockaddr_nl)) < 0) {
-		perror("bind");
-		close(rtnl_sock.fd);
-		return -1;
-	}
-
-	rtnl_sock.cb = rtnl_cb;
-	uloop_fd_add(&rtnl_sock, ULOOP_READ | ULOOP_EDGE_TRIGGER);
-
-	rtnl_seq = time(NULL);
-	rtnl_dump_seq = rtnl_seq;
-	req.nlh.nlmsg_seq = rtnl_seq;
-	send(rtnl_sock.fd, &req, sizeof(req), 0);
-
-	return 0;
-}
-
 static void die(int signo)
 {
 	/*
@@ -898,15 +685,14 @@ int main(int argc, char **argv)
 	if (init_interfaces() < 0)
 		return 1;
 
-	if (rtnl_init() < 0)
+	if (relayd_rtnl_init() < 0)
 		return 1;
 
 	uloop_run();
 	uloop_done();
 
 	cleanup_interfaces();
-	uloop_fd_delete(&rtnl_sock);
-	close(rtnl_sock.fd);
+	relayd_rtnl_done();
 	close(inet_sock);
 
 	return 0;

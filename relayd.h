@@ -18,6 +18,23 @@
 #ifndef __RELAYD_H
 #define __RELAYD_H
 
+#include <arpa/inet.h>
+#include <net/if.h>
+#include <net/ethernet.h>
+#include <netinet/if_ether.h>
+#include <netinet/ip.h>
+#include <netinet/udp.h>
+
+#include <linux/if_packet.h>
+#include <linux/rtnetlink.h>
+#include <linux/neighbour.h>
+
+#include <stdint.h>
+#include <stdbool.h>
+
+#include "uloop.h"
+#include "list.h"
+
 #define DEBUG
 #ifdef DEBUG
 #define DPRINTF(level, ...) if (debug >= level) fprintf(stderr, __VA_ARGS__);
@@ -89,5 +106,13 @@ struct rtnl_req {
 
 struct list_head interfaces;
 extern int debug;
+
+void relayd_add_route(struct relayd_host *host);
+void relayd_del_route(struct relayd_host *host);
+
+int relayd_rtnl_init(void);
+void relayd_rtnl_done(void);
+
+struct relayd_host *relayd_refresh_host(struct relayd_interface *rif, const uint8_t *lladdr, const uint8_t *ipaddr);
 
 #endif
