@@ -20,11 +20,24 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include "relayd.h"
 
 static struct uloop_fd rtnl_sock;
 static unsigned int rtnl_seq, rtnl_dump_seq;
+
+static void rtnl_flush(void)
+{
+	int fd;
+
+	fd = open("/proc/sys/net/ipv4/route/flush", O_WRONLY);
+	if (fd < 0)
+		return;
+
+	write(fd, "-1", 2);
+	close(fd);
+}
 
 static void rtnl_route_set(struct relayd_host *host, bool add)
 {
@@ -70,6 +83,7 @@ static void rtnl_route_set(struct relayd_host *host, bool add)
 	}
 
 	send(rtnl_sock.fd, &req, sizeof(req), 0);
+	rtnl_flush();
 }
 
 void relayd_add_route(struct relayd_host *host)
