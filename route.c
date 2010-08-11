@@ -52,24 +52,29 @@ static void rtnl_route_set(struct relayd_host *host, bool add)
 			struct rtattr rta;
 			int ifindex;
 		} __packed dev;
-	} __packed req;
+	} __packed req = {
+		.nl = {
+			.nlmsg_len = sizeof(req),
+		},
+		.rt = {
+			.rtm_family = AF_INET,
+			.rtm_dst_len = 32,
+			.rtm_table = RT_TABLE_MAIN,
+		},
+		.dst.rta = {
+			.rta_type = RTA_DST,
+			.rta_len = sizeof(req.dst),
+		},
+		.dev.rta = {
+			.rta_type = RTA_OIF,
+			.rta_len = sizeof(req.dev),
+		},
+	};
 
-	memset(&req, 0, sizeof(req));
-
-	req.nl.nlmsg_len = sizeof(req);
-	req.rt.rtm_family = AF_INET;
-	req.rt.rtm_dst_len = 32;
-
-	req.dst.rta.rta_type = RTA_DST;
-	req.dst.rta.rta_len = sizeof(req.dst);
 	memcpy(req.dst.ipaddr, host->ipaddr, sizeof(req.dst.ipaddr));
-
-	req.dev.rta.rta_type = RTA_OIF;
-	req.dev.rta.rta_len = sizeof(req.dev);
 	req.dev.ifindex = host->rif->sll.sll_ifindex;
 
 	req.nl.nlmsg_flags = NLM_F_REQUEST;
-	req.rt.rtm_table = RT_TABLE_MAIN;
 	if (add) {
 		req.nl.nlmsg_type = RTM_NEWROUTE;
 		req.nl.nlmsg_flags |= NLM_F_CREATE | NLM_F_REPLACE;
