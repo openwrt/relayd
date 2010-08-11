@@ -88,6 +88,7 @@ static void del_host(struct relayd_host *host)
 
 	if (host->rif->managed)
 		relayd_del_route(host);
+	uloop_timeout_cancel(&host->timeout);
 	list_del(&host->list);
 	free(host);
 }
