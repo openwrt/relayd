@@ -426,6 +426,9 @@ static void recv_arp_reply(struct relayd_interface *rif, struct arp_packet *pkt)
 	if (!host)
 		return;
 
+	if (host->rif == rif)
+		return;
+
 	send_arp_reply(host->rif, pkt->arp.arp_spa, host->lladdr, host->ipaddr);
 }
 
