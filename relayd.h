@@ -104,7 +104,7 @@ struct rtnl_req {
 	struct rtmsg rt;
 } __packed;
 
-struct list_head interfaces;
+extern struct list_head interfaces;
 extern int debug;
 
 void relayd_add_route(struct relayd_host *host);
