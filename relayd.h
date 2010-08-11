@@ -68,6 +68,7 @@ struct relayd_interface {
 	struct list_head hosts;
 	uint8_t src_ip[4];
 	bool managed;
+	int rt_table;
 };
 
 struct relayd_host {
@@ -106,9 +107,22 @@ struct rtnl_req {
 
 extern struct list_head interfaces;
 extern int debug;
+extern int route_table;
 
-void relayd_add_route(struct relayd_host *host);
-void relayd_del_route(struct relayd_host *host);
+void rtnl_route_set(struct relayd_host *host, bool add);
+
+static inline void relayd_add_route(struct relayd_host *host)
+{
+	rtnl_route_set(host, true);
+}
+
+static inline void relayd_del_route(struct relayd_host *host)
+{
+	rtnl_route_set(host, false);
+}
+
+void relayd_add_interface_routes(struct relayd_interface *rif);
+void relayd_del_interface_routes(struct relayd_interface *rif);
 
 int relayd_rtnl_init(void);
 void relayd_rtnl_done(void);

@@ -535,6 +535,7 @@ static int init_interface(struct relayd_interface *rif)
 #endif
 
 	uloop_fd_add(&rif->bcast_fd, ULOOP_READ | ULOOP_EDGE_TRIGGER);
+	relayd_add_interface_routes(rif);
 	return 0;
 }
 
@@ -552,22 +553,26 @@ static int init_interfaces(void)
 	return 0;
 }
 
-static void del_interface(struct relayd_interface *rif)
+static void cleanup_hosts(void)
 {
-	struct relayd_host *host, *htmp;
+	struct relayd_interface *rif;
+	struct relayd_host *host, *tmp;
 
-	list_for_each_entry_safe(host, htmp, &rif->hosts, list) {
-		del_host(host);
+	list_for_each_entry(rif, &interfaces, list) {
+		list_for_each_entry_safe(host, tmp, &rif->hosts, list) {
+			del_host(host);
+		}
 	}
-	free(rif);
 }
 
-static void cleanup_interfaces(void)
+static void free_interfaces(void)
 {
 	struct relayd_interface *rif, *rtmp;
 
 	list_for_each_entry_safe(rif, rtmp, &interfaces, list) {
-		del_interface(rif);
+		relayd_del_interface_routes(rif);
+		list_del(&rif->list);
+		free(rif);
 	}
 }
 
@@ -597,7 +602,8 @@ static void die(int signo)
 	 * When we hit SIGTERM, clean up interfaces directly, so that we
 	 * won't leave our routing in an invalid state.
 	 */
-	cleanup_interfaces();
+	cleanup_hosts();
+	free_interfaces();
 	exit(1);
 }
 
@@ -611,6 +617,7 @@ static int usage(const char *progname)
 			"	-I <ifname>	Same as -i, except with ARP cache and host route management\n"
 			"			You need to specify at least two interfaces\n"
 			"	-t <timeout>	Host entry expiry timeout\n"
+			"	-T <table>	Set routing table number for automatically added routes\n"
 			"	-B		Enable broadcast forwarding\n"
 			"	-D		Enable DHCP forwarding\n"
 			"\n",
@@ -635,7 +642,7 @@ int main(int argc, char **argv)
 	forward_bcast = 0;
 	uloop_init();
 
-	while ((ch = getopt(argc, argv, "I:i:t:BDd")) != -1) {
+	while ((ch = getopt(argc, argv, "I:i:t:BDdT:")) != -1) {
 		switch(ch) {
 		case 'I':
 			managed = true;
@@ -661,6 +668,11 @@ int main(int argc, char **argv)
 		case 'D':
 			forward_dhcp = 1;
 			break;
+		case 'T':
+			route_table = atoi(optarg);
+			if (route_table <= 0)
+				return usage(argv[0]);
+			break;
 		case '?':
 		default:
 			return usage(argv[0]);
@@ -683,16 +695,17 @@ int main(int argc, char **argv)
 	signal(SIGUSR1, die);
 	signal(SIGUSR2, die);
 
-	if (init_interfaces() < 0)
+	if (relayd_rtnl_init() < 0)
 		return 1;
 
-	if (relayd_rtnl_init() < 0)
+	if (init_interfaces() < 0)
 		return 1;
 
 	uloop_run();
 	uloop_done();
 
-	cleanup_interfaces();
+	cleanup_hosts();
+	free_interfaces();
 	relayd_rtnl_done();
 	close(inet_sock);
 

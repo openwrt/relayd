@@ -22,10 +22,13 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#include <linux/fib_rules.h>
+
 #include "relayd.h"
 
 static struct uloop_fd rtnl_sock;
 static unsigned int rtnl_seq, rtnl_dump_seq;
+int route_table = 16800;
 
 static void rtnl_flush(void)
 {
@@ -39,7 +42,7 @@ static void rtnl_flush(void)
 	close(fd);
 }
 
-static void rtnl_route_set(struct relayd_host *host, bool add)
+static void rtnl_route_request(struct relayd_interface *rif, struct relayd_host *host, bool add)
 {
 	static struct {
 		struct nlmsghdr nl;
@@ -48,6 +51,10 @@ static void rtnl_route_set(struct relayd_host *host, bool add)
 			struct rtattr rta;
 			uint8_t ipaddr[4];
 		} __packed dst;
+		struct {
+			struct rtattr rta;
+			int table;
+		} __packed table;
 		struct {
 			struct rtattr rta;
 			int ifindex;
@@ -61,6 +68,10 @@ static void rtnl_route_set(struct relayd_host *host, bool add)
 			.rtm_dst_len = 32,
 			.rtm_table = RT_TABLE_MAIN,
 		},
+		.table.rta = {
+			.rta_type = RTA_TABLE,
+			.rta_len = sizeof(req.table),
+		},
 		.dst.rta = {
 			.rta_type = RTA_DST,
 			.rta_len = sizeof(req.dst),
@@ -73,6 +84,7 @@ static void rtnl_route_set(struct relayd_host *host, bool add)
 
 	memcpy(req.dst.ipaddr, host->ipaddr, sizeof(req.dst.ipaddr));
 	req.dev.ifindex = host->rif->sll.sll_ifindex;
+	req.table.table = rif->rt_table;
 
 	req.nl.nlmsg_flags = NLM_F_REQUEST;
 	if (add) {
@@ -91,14 +103,79 @@ static void rtnl_route_set(struct relayd_host *host, bool add)
 	rtnl_flush();
 }
 
-void relayd_add_route(struct relayd_host *host)
+static void rtnl_rule_request(struct relayd_interface *rif, bool add)
 {
-	rtnl_route_set(host, true);
+	static struct {
+		struct nlmsghdr nl;
+		struct rtmsg rt;
+		struct {
+			struct rtattr rta;
+			int table;
+		} __packed table;
+		struct {
+			struct rtattr rta;
+			char ifname[IFNAMSIZ + 1];
+		} __packed dev;
+	} __packed req = {
+		.rt = {
+			.rtm_family = AF_INET,
+			.rtm_table = RT_TABLE_UNSPEC,
+			.rtm_scope = RT_SCOPE_UNIVERSE,
+			.rtm_protocol = RTPROT_BOOT,
+		},
+		.table.rta = {
+			.rta_type = FRA_TABLE,
+			.rta_len = sizeof(req.table),
+		},
+		.dev.rta = {
+			.rta_type = FRA_IFNAME,
+		},
+	};
+
+	int padding = sizeof(req.dev.ifname);
+	padding -= strlen(rif->ifname) + 1;
+
+	strcpy(req.dev.ifname, rif->ifname);
+	req.dev.rta.rta_len = sizeof(req.dev.rta) + strlen(rif->ifname) + 1;
+	req.table.table = rif->rt_table;
+	req.nl.nlmsg_len = sizeof(req) - padding;
+
+	req.nl.nlmsg_flags = NLM_F_REQUEST;
+	if (add) {
+		req.nl.nlmsg_type = RTM_NEWRULE;
+		req.nl.nlmsg_flags |= NLM_F_CREATE | NLM_F_EXCL;
+
+		req.rt.rtm_type = RTN_UNICAST;
+	} else {
+		req.nl.nlmsg_type = RTM_DELRULE;
+		req.rt.rtm_type = RTN_UNSPEC;
+	}
+
+	send(rtnl_sock.fd, &req, req.nl.nlmsg_len, 0);
+	rtnl_flush();
 }
 
-void relayd_del_route(struct relayd_host *host)
+void rtnl_route_set(struct relayd_host *host, bool add)
 {
-	rtnl_route_set(host, false);
+	struct relayd_interface *rif;
+
+	list_for_each_entry(rif, &interfaces, list) {
+		if (rif == host->rif)
+			continue;
+
+		rtnl_route_request(rif, host, add);
+	}
+}
+
+void relayd_add_interface_routes(struct relayd_interface *rif)
+{
+	rif->rt_table = route_table++;
+	rtnl_rule_request(rif, true);
+}
+
+void relayd_del_interface_routes(struct relayd_interface *rif)
+{
+	rtnl_rule_request(rif, false);
 }
 
 #ifndef NDA_RTA
