@@ -85,21 +85,6 @@ struct arp_packet {
 	struct ether_arp arp;
 } __packed;
 
-struct ip_packet {
-	struct ether_header eth;
-	struct iphdr iph;
-} __packed;
-
-struct dhcp_header {
-	uint8_t op, htype, hlen, hops;
-	uint32_t xit;
-	uint16_t secs, flags;
-	struct in_addr ciaddr, yiaddr, siaddr, giaddr;
-	unsigned char chaddr[16];
-	unsigned char sname[64];
-	unsigned char file[128];
-} __packed;
-
 struct rtnl_req {
 	struct nlmsghdr nl;
 	struct rtmsg rt;
@@ -127,6 +112,11 @@ void relayd_del_interface_routes(struct relayd_interface *rif);
 int relayd_rtnl_init(void);
 void relayd_rtnl_done(void);
 
-struct relayd_host *relayd_refresh_host(struct relayd_interface *rif, const uint8_t *lladdr, const uint8_t *ipaddr);
+struct relayd_host *relayd_refresh_host(struct relayd_interface *rif,
+					const uint8_t *lladdr,
+					const uint8_t *ipaddr);
+
+void relayd_forward_bcast_packet(struct relayd_interface *from_rif, void *packet, int len);
+bool relayd_handle_dhcp_packet(struct relayd_interface *rif, void *data, int len, bool forward);
 
 #endif

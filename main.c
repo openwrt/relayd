@@ -329,7 +329,7 @@ static void recv_packet(struct uloop_fd *fd, unsigned int events)
 	} while (1);
 }
 
-static void forward_bcast_packet(struct relayd_interface *from_rif, void *packet, int len)
+void relayd_forward_bcast_packet(struct relayd_interface *from_rif, void *packet, int len)
 {
 	struct relayd_interface *rif;
 	struct ether_header *eth = packet;
@@ -342,86 +342,6 @@ static void forward_bcast_packet(struct relayd_interface *from_rif, void *packet
 		memcpy(eth->ether_shost, rif->sll.sll_addr, ETH_ALEN);
 		send(rif->bcast_fd.fd, packet, len, 0);
 	}
-}
-
-static uint16_t
-chksum(uint16_t sum, const uint8_t *data, uint16_t len)
-{
-	const uint8_t *last;
-	uint16_t t;
-
-	last = data + len - 1;
-
-	while(data < last) {
-		t = (data[0] << 8) + data[1];
-		sum += t;
-		if(sum < t)
-			sum++;
-		data += 2;
-	}
-
-	if(data == last) {
-		t = (data[0] << 8) + 0;
-		sum += t;
-		if(sum < t)
-			sum++;
-	}
-
-	return sum;
-}
-
-static bool forward_dhcp_packet(struct relayd_interface *rif, void *data, int len)
-{
-	struct ip_packet *pkt = data;
-	struct udphdr *udp;
-	struct dhcp_header *dhcp;
-	int udplen;
-	uint16_t sum;
-
-	if (pkt->eth.ether_type != htons(ETH_P_IP))
-		return false;
-
-	if (pkt->iph.version != 4)
-		return false;
-
-	if (pkt->iph.protocol != IPPROTO_UDP)
-		return false;
-
-	udp = (void *) ((char *) &pkt->iph + (pkt->iph.ihl << 2));
-	dhcp = (void *) (udp + 1);
-
-	udplen = ntohs(udp->len);
-	if (udplen > len - ((char *) udp - (char *) data))
-		return false;
-
-	if (udp->dest != htons(67) && udp->source != htons(67))
-		return false;
-
-	if (dhcp->op != 1 && dhcp->op != 2)
-		return false;
-
-	if (!forward_dhcp)
-		return true;
-
-	if (dhcp->op == 2)
-		relayd_refresh_host(rif, pkt->eth.ether_shost, (void *) &pkt->iph.saddr);
-
-	DPRINTF(2, "%s: handling DHCP %s\n", rif->ifname, (dhcp->op == 1 ? "request" : "response"));
-
-	dhcp->flags |= htons(DHCP_FLAG_BROADCAST);
-
-	udp->check = 0;
-	sum = udplen + IPPROTO_UDP;
-	sum = chksum(sum, (void *) &pkt->iph.saddr, 8);
-	sum = chksum(sum, (void *) udp, udplen);
-	if (sum == 0)
-		sum = 0xffff;
-
-	udp->check = htons(~sum);
-
-	forward_bcast_packet(rif, data, len);
-
-	return true;
 }
 
 static void recv_bcast_packet(struct uloop_fd *fd, unsigned int events)
@@ -448,11 +368,11 @@ static void recv_bcast_packet(struct uloop_fd *fd, unsigned int events)
 		if (!forward_bcast && !forward_dhcp)
 			continue;
 
-		if (forward_dhcp_packet(rif, pktbuf, pktlen))
+		if (relayd_handle_dhcp_packet(rif, pktbuf, pktlen, forward_dhcp))
 			continue;
 
 		if (forward_bcast)
-			forward_bcast_packet(rif, pktbuf, pktlen);
+			relayd_forward_bcast_packet(rif, pktbuf, pktlen);
 	} while (1);
 }
 
