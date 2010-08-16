@@ -73,11 +73,18 @@ struct relayd_interface {
 
 struct relayd_host {
 	struct list_head list;
+	struct list_head routes;
 	struct relayd_interface *rif;
 	uint8_t lladdr[ETH_ALEN];
 	uint8_t ipaddr[4];
 	struct uloop_timeout timeout;
 	int cleanup_pending;
+};
+
+struct relayd_route {
+	struct list_head list;
+	uint8_t dest[4];
+	uint8_t mask;
 };
 
 struct arp_packet {
@@ -94,16 +101,16 @@ extern struct list_head interfaces;
 extern int debug;
 extern int route_table;
 
-void rtnl_route_set(struct relayd_host *host, bool add);
+void rtnl_route_set(struct relayd_host *host, struct relayd_route *route, bool add);
 
-static inline void relayd_add_route(struct relayd_host *host)
+static inline void relayd_add_route(struct relayd_host *host, struct relayd_route *route)
 {
-	rtnl_route_set(host, true);
+	rtnl_route_set(host, route, true);
 }
 
-static inline void relayd_del_route(struct relayd_host *host)
+static inline void relayd_del_route(struct relayd_host *host, struct relayd_route *route)
 {
-	rtnl_route_set(host, false);
+	rtnl_route_set(host, route, false);
 }
 
 void relayd_add_interface_routes(struct relayd_interface *rif);
@@ -115,6 +122,8 @@ void relayd_rtnl_done(void);
 struct relayd_host *relayd_refresh_host(struct relayd_interface *rif,
 					const uint8_t *lladdr,
 					const uint8_t *ipaddr);
+void relayd_add_host_route(struct relayd_host *host, const uint8_t *ipaddr, uint8_t mask);
+void relayd_add_pending_route(const uint8_t *gateway, const uint8_t *dest, uint8_t mask, int timeout);
 
 void relayd_forward_bcast_packet(struct relayd_interface *from_rif, void *packet, int len);
 bool relayd_handle_dhcp_packet(struct relayd_interface *rif, void *data, int len, bool forward);

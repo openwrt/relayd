@@ -29,6 +29,19 @@ struct ip_packet {
 	struct iphdr iph;
 } __packed;
 
+
+enum {
+	DHCP_OPTION_ROUTER = 0x03,
+	DHCP_OPTION_ROUTES = 0x79,
+	DHCP_OPTION_END	= 0xff,
+};
+
+struct dhcp_option {
+	uint8_t code;
+	uint8_t len;
+	uint8_t data[];
+};
+
 struct dhcp_header {
 	uint8_t op, htype, hlen, hops;
 	uint32_t xit;
@@ -37,6 +50,8 @@ struct dhcp_header {
 	unsigned char chaddr[16];
 	unsigned char sname[64];
 	unsigned char file[128];
+	uint32_t cookie;
+	uint8_t option_data[];
 } __packed;
 
 static uint16_t
@@ -65,11 +80,46 @@ chksum(uint16_t sum, const uint8_t *data, uint16_t len)
 	return sum;
 }
 
+static void
+parse_dhcp_options(struct relayd_host *host, struct dhcp_header *dhcp, int len)
+{
+	uint8_t *end = (uint8_t *) dhcp + len;
+	struct dhcp_option *opt = (void *)dhcp->option_data;
+	static const uint8_t dest[4] = { 0, 0, 0, 0 };
+
+	while((uint8_t *) opt < end) {
+		if ((uint8_t *) opt + opt->len > end)
+			break;
+
+		opt = (void *) &opt->data[opt->len];
+		switch(opt->code) {
+		case DHCP_OPTION_ROUTER:
+			DPRINTF(2, "Found a DHCP router option, len=%d\n", opt->len);
+			if (!memcmp(opt->data, host->ipaddr, 4))
+				relayd_add_host_route(host, dest, 0);
+			else
+				relayd_add_pending_route(opt->data, dest, 0, 10000);
+			break;
+		case DHCP_OPTION_ROUTES:
+			DPRINTF(2, "Found a DHCP static routes option, len=%d\n", opt->len);
+			break;
+		case DHCP_OPTION_END:
+			opt = (void *) end;
+			continue;
+		default:
+			DPRINTF(3, "Skipping unknown DHCP option %02x\n", opt->code);
+			continue;
+		}
+
+	}
+}
+
 bool relayd_handle_dhcp_packet(struct relayd_interface *rif, void *data, int len, bool forward)
 {
 	struct ip_packet *pkt = data;
 	struct udphdr *udp;
 	struct dhcp_header *dhcp;
+	struct relayd_host *host;
 	int udplen;
 	uint16_t sum;
 
@@ -98,8 +148,11 @@ bool relayd_handle_dhcp_packet(struct relayd_interface *rif, void *data, int len
 	if (!forward)
 		return true;
 
-	if (dhcp->op == 2)
-		relayd_refresh_host(rif, pkt->eth.ether_shost, (void *) &pkt->iph.saddr);
+	if (dhcp->op == 2) {
+		host = relayd_refresh_host(rif, pkt->eth.ether_shost, (void *) &pkt->iph.saddr);
+		if (host)
+			parse_dhcp_options(host, dhcp, udplen - sizeof(struct udphdr));
+	}
 
 	DPRINTF(2, "%s: handling DHCP %s\n", rif->ifname, (dhcp->op == 1 ? "request" : "response"));
 
