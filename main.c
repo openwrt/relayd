@@ -635,6 +635,8 @@ static int usage(const char *progname)
 			"	-I <ifname>	Same as -i, except with ARP cache and host route management\n"
 			"			You need to specify at least two interfaces\n"
 			"	-G <ip>		Set a gateway IP for clients\n"
+			"	-R <gateway>:<net>/<mask>\n"
+			"			Add a static route for <net>/<mask> via <gateway>\n"
 			"	-t <timeout>	Host entry expiry timeout\n"
 			"	-T <table>	Set routing table number for automatically added routes\n"
 			"	-B		Enable broadcast forwarding\n"
@@ -647,9 +649,11 @@ static int usage(const char *progname)
 int main(int argc, char **argv)
 {
 	struct relayd_interface *rif = NULL;
-	struct in_addr addr;
+	struct in_addr addr, addr2;
 	bool managed;
 	int ifnum = 0;
+	char *s, *s2;
+	int mask;
 	int ch;
 
 	debug = 0;
@@ -663,7 +667,7 @@ int main(int argc, char **argv)
 	forward_bcast = 0;
 	uloop_init();
 
-	while ((ch = getopt(argc, argv, "I:i:t:BDdT:G:")) != -1) {
+	while ((ch = getopt(argc, argv, "I:i:t:BDdT:G:R:")) != -1) {
 		switch(ch) {
 		case 'I':
 			managed = true;
@@ -701,6 +705,33 @@ int main(int argc, char **argv)
 				return 1;
 			}
 			relayd_add_pending_route((uint8_t *) &addr.s_addr, (const uint8_t *) "\x00\x00\x00\x00", 0, 0);
+			break;
+		case 'R':
+			s = strchr(optarg, ':');
+			if (!s)
+				return usage(argv[0]);
+
+			*(s++) = 0;
+			if (!inet_aton(optarg, &addr)) {
+				fprintf(stderr, "Address '%s' not found\n", optarg);
+				return 1;
+			}
+
+			s2 = strchr(s, '/');
+			if (!s2)
+				return usage(argv[0]);
+
+			*(s2++) = 0;
+			if (!inet_aton(s, &addr2)) {
+				fprintf(stderr, "Address '%s' not found\n", s);
+				return 1;
+			}
+
+			mask = atoi(s2);
+			if (mask < 0 || mask > 32)
+				return usage(argv[0]);
+
+			relayd_add_pending_route((uint8_t *) &addr.s_addr, (uint8_t *) &addr2.s_addr, mask, 0);
 			break;
 		case '?':
 		default:
