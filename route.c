@@ -324,21 +324,28 @@ static void rtnl_cb(struct uloop_fd *fd, unsigned int events)
 	} while (1);
 }
 
-int relayd_rtnl_init(void)
+static void rtnl_dump_request(int nlmsg_type)
 {
-	struct sockaddr_nl snl_local;
 	static struct {
 		struct nlmsghdr nlh;
 		struct rtgenmsg g;
 	} req = {
 		.nlh = {
 			.nlmsg_len = sizeof(req),
-			.nlmsg_type = RTM_GETNEIGH,
 			.nlmsg_flags = NLM_F_ROOT|NLM_F_MATCH|NLM_F_REQUEST,
 			.nlmsg_pid = 0,
 		},
 		.g.rtgen_family = AF_INET,
 	};
+	req.nlh.nlmsg_type = nlmsg_type;
+	req.nlh.nlmsg_seq = rtnl_seq;
+	send(rtnl_sock.fd, &req, sizeof(req), 0);
+	rtnl_seq++;
+}
+
+int relayd_rtnl_init(void)
+{
+	struct sockaddr_nl snl_local;
 
 	rtnl_sock.fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
 	if (rtnl_sock.fd < 0) {
@@ -359,8 +366,7 @@ int relayd_rtnl_init(void)
 
 	rtnl_seq = time(NULL);
 	rtnl_dump_seq = rtnl_seq;
-	req.nlh.nlmsg_seq = rtnl_seq;
-	send(rtnl_sock.fd, &req, sizeof(req), 0);
+	rtnl_dump_request(RTM_GETNEIGH);
 
 	return 0;
 }
