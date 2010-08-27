@@ -360,7 +360,9 @@ static void recv_arp_request(struct relayd_interface *rif, struct arp_packet *pk
 		return;
 	}
 
-	relayd_refresh_host(rif, pkt->eth.ether_shost, pkt->arp.arp_spa);
+	host = find_host_by_ipaddr(NULL, pkt->arp.arp_spa);
+	if (!host || host->rif != rif)
+		relayd_refresh_host(rif, pkt->eth.ether_shost, pkt->arp.arp_spa);
 
 	host = find_host_by_ipaddr(NULL, pkt->arp.arp_tpa);
 
