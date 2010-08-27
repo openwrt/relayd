@@ -345,6 +345,11 @@ static void recv_arp_request(struct relayd_interface *rif, struct arp_packet *pk
 	if (!memcmp(pkt->arp.arp_spa, "\x00\x00\x00\x00", 4))
 		return;
 
+	if (local_route_table && !memcmp(pkt->arp.arp_tpa, local_addr, sizeof(local_addr))) {
+		send_arp_reply(rif, local_addr, pkt->arp.arp_sha, pkt->arp.arp_spa);
+		return;
+	}
+
 	relayd_refresh_host(rif, pkt->eth.ether_shost, pkt->arp.arp_spa);
 
 	host = find_host_by_ipaddr(NULL, pkt->arp.arp_tpa);
