@@ -206,8 +206,8 @@ void relayd_add_pending_route(const uint8_t *gateway, const uint8_t *dest, uint8
 	}
 }
 
-static void send_arp_reply(struct relayd_interface *rif, uint8_t spa[4],
-                           uint8_t tha[ETH_ALEN], uint8_t tpa[4])
+static void send_arp_reply(struct relayd_interface *rif, const uint8_t spa[4],
+                           const uint8_t tha[ETH_ALEN], const uint8_t tpa[4])
 {
 	struct arp_packet pkt;
 
@@ -291,6 +291,19 @@ static struct relayd_host *add_host(struct relayd_interface *rif, const uint8_t 
 	return host;
 }
 
+static void send_gratuitous_arp(struct relayd_interface *rif, const uint8_t *spa)
+{
+	struct relayd_interface *to_rif;
+
+	list_for_each_entry(to_rif, &interfaces, list) {
+		if (rif == to_rif)
+			continue;
+
+		send_arp_reply(to_rif, spa, NULL, spa);
+	}
+}
+
+
 struct relayd_host *relayd_refresh_host(struct relayd_interface *rif, const uint8_t *lladdr, const uint8_t *ipaddr)
 {
 	struct relayd_host *host;
@@ -315,6 +328,7 @@ struct relayd_host *relayd_refresh_host(struct relayd_interface *rif, const uint
 	} else {
 		host->cleanup_pending = false;
 		uloop_timeout_set(&host->timeout, host_timeout * 1000);
+		send_gratuitous_arp(rif, ipaddr);
 	}
 
 	return host;
@@ -378,10 +392,8 @@ static void recv_arp_request(struct relayd_interface *rif, struct arp_packet *pk
 	relay_arp_request(rif, pkt);
 }
 
-
 static void recv_arp_reply(struct relayd_interface *rif, struct arp_packet *pkt)
 {
-	struct relayd_interface *to_rif;
 	struct relayd_host *host;
 
 	DPRINTF(2, "%s: received ARP reply for "IP_FMT" from "MAC_FMT", deliver to "IP_FMT"\n",
@@ -392,20 +404,6 @@ static void recv_arp_reply(struct relayd_interface *rif, struct arp_packet *pkt)
 
 	if (memcmp(pkt->arp.arp_sha, rif->sll.sll_addr, ETH_ALEN) != 0)
 		relayd_refresh_host(rif, pkt->arp.arp_sha, pkt->arp.arp_spa);
-
-	if (!memcmp(pkt->arp.arp_tpa, rif->src_ip, 4)) {
-		/*
-		 * locally initiated lookup, relay as gratuitous ARP
-		 * to all other interfaces
-		 */
-		list_for_each_entry(to_rif, &interfaces, list) {
-			if (rif == to_rif)
-				continue;
-
-			send_arp_reply(to_rif, pkt->arp.arp_spa, NULL, pkt->arp.arp_spa);
-		}
-		return;
-	}
 
 	host = find_host_by_ipaddr(NULL, pkt->arp.arp_tpa);
 	if (!host)
