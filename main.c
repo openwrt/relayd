@@ -40,6 +40,9 @@ static int inet_sock;
 static int forward_bcast;
 static int forward_dhcp;
 
+uint8_t local_addr[4];
+int local_route_table;
+
 struct relayd_pending_route {
 	struct relayd_route rt;
 	struct uloop_timeout timeout;
@@ -641,6 +644,7 @@ static int usage(const char *progname)
 			"	-T <table>	Set routing table number for automatically added routes\n"
 			"	-B		Enable broadcast forwarding\n"
 			"	-D		Enable DHCP forwarding\n"
+			"	-L <ipaddr>	Enable local access using <ipaddr> as source address\n"
 			"\n",
 		progname);
 	return -1;
@@ -650,6 +654,7 @@ int main(int argc, char **argv)
 {
 	struct relayd_interface *rif = NULL;
 	struct in_addr addr, addr2;
+	bool local_addr_valid = false;
 	bool managed;
 	int ifnum = 0;
 	char *s, *s2;
@@ -665,9 +670,10 @@ int main(int argc, char **argv)
 
 	host_timeout = 60;
 	forward_bcast = 0;
+	local_route_table = 0;
 	uloop_init();
 
-	while ((ch = getopt(argc, argv, "I:i:t:BDdT:G:R:")) != -1) {
+	while ((ch = getopt(argc, argv, "I:i:t:BDdT:G:R:L:")) != -1) {
 		switch(ch) {
 		case 'I':
 			managed = true;
@@ -705,6 +711,14 @@ int main(int argc, char **argv)
 				return 1;
 			}
 			relayd_add_pending_route((uint8_t *) &addr.s_addr, (const uint8_t *) "\x00\x00\x00\x00", 0, 0);
+			break;
+		case 'L':
+			if (!inet_aton(optarg, &addr)) {
+				fprintf(stderr, "Address '%s' not found\n", optarg);
+				return 1;
+			}
+			memcpy(&local_addr, &addr.s_addr, sizeof(local_addr));
+			local_addr_valid = true;
 			break;
 		case 'R':
 			s = strchr(optarg, ':');
@@ -754,6 +768,9 @@ int main(int argc, char **argv)
 	signal(SIGHUP, die);
 	signal(SIGUSR1, die);
 	signal(SIGUSR2, die);
+
+	if (local_addr_valid)
+		local_route_table = route_table++;
 
 	if (relayd_rtnl_init() < 0)
 		return 1;
