@@ -138,7 +138,7 @@ static void del_host(struct relayd_host *host)
 	free(host);
 }
 
-static void fill_arp_request(struct arp_packet *pkt, struct relayd_interface *rif,
+static void fill_arp_packet(struct arp_packet *pkt, struct relayd_interface *rif,
                              const uint8_t spa[4], const uint8_t tpa[4])
 {
 	memset(pkt, 0, sizeof(*pkt));
@@ -160,7 +160,7 @@ static void send_arp_request(struct relayd_interface *rif, const uint8_t *ipaddr
 {
 	struct arp_packet pkt;
 
-	fill_arp_request(&pkt, rif, rif->src_ip, ipaddr);
+	fill_arp_packet(&pkt, rif, rif->src_ip, ipaddr);
 
 	pkt.arp.arp_op = htons(ARPOP_REQUEST);
 	memcpy(pkt.arp.arp_spa, rif->src_ip, ETH_ALEN);
@@ -210,15 +210,24 @@ static void send_arp_reply(struct relayd_interface *rif, uint8_t spa[4],
 {
 	struct arp_packet pkt;
 
-	fill_arp_request(&pkt, rif, spa, tpa);
+	fill_arp_packet(&pkt, rif, spa, tpa);
 
 	pkt.arp.arp_op = htons(ARPOP_REPLY);
-	memcpy(pkt.eth.ether_dhost, tha, ETH_ALEN);
-	memcpy(pkt.arp.arp_tha, tha, ETH_ALEN);
+	if (tha) {
+		memcpy(pkt.eth.ether_dhost, tha, ETH_ALEN);
+		memcpy(pkt.arp.arp_tha, tha, ETH_ALEN);
 
-	DPRINTF(2, "%s: sending ARP reply to "IP_FMT", "IP_FMT" is at ("MAC_FMT")\n",
-		rif->ifname, IP_BUF(pkt.arp.arp_tpa),
-		IP_BUF(pkt.arp.arp_spa), MAC_BUF(pkt.eth.ether_shost));
+		DPRINTF(2, "%s: sending ARP reply to "IP_FMT", "IP_FMT" is at ("MAC_FMT")\n",
+			rif->ifname, IP_BUF(pkt.arp.arp_tpa),
+			IP_BUF(pkt.arp.arp_spa), MAC_BUF(pkt.eth.ether_shost));
+	} else {
+		memset(pkt.eth.ether_dhost, 0xff, ETH_ALEN);
+		memset(pkt.arp.arp_tha, 0, ETH_ALEN);
+
+		DPRINTF(2, "%s: sending gratuitous ARP: "IP_FMT" is at ("MAC_FMT")\n",
+			rif->ifname, IP_BUF(pkt.arp.arp_tpa),
+			MAC_BUF(pkt.eth.ether_shost));
+	}
 
 	sendto(rif->fd.fd, &pkt, sizeof(pkt), 0,
 		(struct sockaddr *) &rif->sll, sizeof(rif->sll));
@@ -369,6 +378,7 @@ static void recv_arp_request(struct relayd_interface *rif, struct arp_packet *pk
 
 static void recv_arp_reply(struct relayd_interface *rif, struct arp_packet *pkt)
 {
+	struct relayd_interface *to_rif;
 	struct relayd_host *host;
 
 	DPRINTF(2, "%s: received ARP reply for "IP_FMT" from "MAC_FMT", deliver to "IP_FMT"\n",
@@ -380,8 +390,19 @@ static void recv_arp_reply(struct relayd_interface *rif, struct arp_packet *pkt)
 	if (memcmp(pkt->arp.arp_sha, rif->sll.sll_addr, ETH_ALEN) != 0)
 		relayd_refresh_host(rif, pkt->arp.arp_sha, pkt->arp.arp_spa);
 
-	if (!memcmp(pkt->arp.arp_tpa, rif->src_ip, 4))
+	if (!memcmp(pkt->arp.arp_tpa, rif->src_ip, 4)) {
+		/*
+		 * locally initiated lookup, relay as gratuitous ARP
+		 * to all other interfaces
+		 */
+		list_for_each_entry(to_rif, &interfaces, list) {
+			if (rif == to_rif)
+				continue;
+
+			send_arp_reply(to_rif, pkt->arp.arp_spa, NULL, pkt->arp.arp_spa);
+		}
 		return;
+	}
 
 	host = find_host_by_ipaddr(NULL, pkt->arp.arp_tpa);
 	if (!host)
