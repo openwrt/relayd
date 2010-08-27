@@ -36,6 +36,7 @@ LIST_HEAD(interfaces);
 int debug;
 
 static int host_timeout;
+static int host_ping_tries;
 static int inet_sock;
 static int forward_bcast;
 static int forward_dhcp;
@@ -244,7 +245,7 @@ static void host_entry_timeout(struct uloop_timeout *timeout)
 	 * When the timeout is reached, try pinging the host a few times before
 	 * giving up on it.
 	 */
-	if (host->rif->managed && host->cleanup_pending < 2) {
+	if (host->rif->managed && host->cleanup_pending < host_ping_tries) {
 		send_arp_request(host->rif, host->ipaddr);
 		host->cleanup_pending++;
 		uloop_timeout_set(&host->timeout, 1000);
@@ -667,6 +668,7 @@ static int usage(const char *progname)
 			"	-R <gateway>:<net>/<mask>\n"
 			"			Add a static route for <net>/<mask> via <gateway>\n"
 			"	-t <timeout>	Host entry expiry timeout\n"
+			"	-p <tries>	Number of ARP ping attempts before considering a host dead\n"
 			"	-T <table>	Set routing table number for automatically added routes\n"
 			"	-B		Enable broadcast forwarding\n"
 			"	-D		Enable DHCP forwarding\n"
@@ -694,7 +696,8 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	host_timeout = 60;
+	host_timeout = 30;
+	host_ping_tries = 5;
 	forward_bcast = 0;
 	local_route_table = 0;
 	uloop_init();
@@ -715,6 +718,11 @@ int main(int argc, char **argv)
 		case 't':
 			host_timeout = atoi(optarg);
 			if (host_timeout <= 0)
+				return usage(argv[0]);
+			break;
+		case 'p':
+			host_ping_tries = atoi(optarg);
+			if (host_ping_tries <= 0)
 				return usage(argv[0]);
 			break;
 		case 'd':
