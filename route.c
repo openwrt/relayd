@@ -42,8 +42,13 @@ static void rtnl_flush(void)
 	close(fd);
 }
 
+enum {
+	RULE_F_ADD = (1 << 0),
+	RULE_F_DEFGW_WORKAROUND = (1 << 1),
+};
+
 static void
-rtnl_rule_request(struct relayd_interface *rif, bool add, bool defgw_workaround)
+rtnl_rule_request(struct relayd_interface *rif, int flags)
 {
 	static struct {
 		struct nlmsghdr nl;
@@ -71,7 +76,7 @@ rtnl_rule_request(struct relayd_interface *rif, bool add, bool defgw_workaround)
 
 	int padding = sizeof(req.dev.ifname);
 
-	if (!defgw_workaround) {
+	if (!(flags & RULE_F_DEFGW_WORKAROUND)) {
 		req.dev.rta.rta_type = FRA_IFNAME;
 		padding -= strlen(rif->ifname) + 1;
 		strcpy(req.dev.ifname, rif->ifname);
@@ -86,7 +91,7 @@ rtnl_rule_request(struct relayd_interface *rif, bool add, bool defgw_workaround)
 	req.nl.nlmsg_len = sizeof(req) - padding;
 
 	req.nl.nlmsg_flags = NLM_F_REQUEST;
-	if (add) {
+	if (flags & RULE_F_ADD) {
 		req.nl.nlmsg_type = RTM_NEWRULE;
 		req.nl.nlmsg_flags |= NLM_F_CREATE | NLM_F_EXCL;
 
@@ -191,10 +196,10 @@ rtnl_route_request(struct relayd_interface *rif, struct relayd_host *host,
 
 	req.nl.nlmsg_len = pktlen;
 	if (route)
-		rtnl_rule_request(rif, true, true);
+		rtnl_rule_request(rif, RULE_F_DEFGW_WORKAROUND | RULE_F_ADD);
 	send(rtnl_sock.fd, &req, pktlen, 0);
 	if (route)
-		rtnl_rule_request(rif, false, true);
+		rtnl_rule_request(rif, RULE_F_DEFGW_WORKAROUND);
 	rtnl_flush();
 }
 
@@ -214,12 +219,12 @@ rtnl_route_set(struct relayd_host *host, struct relayd_route *route, bool add)
 void relayd_add_interface_routes(struct relayd_interface *rif)
 {
 	rif->rt_table = route_table++;
-	rtnl_rule_request(rif, true, false);
+	rtnl_rule_request(rif, RULE_F_ADD);
 }
 
 void relayd_del_interface_routes(struct relayd_interface *rif)
 {
-	rtnl_rule_request(rif, false, false);
+	rtnl_rule_request(rif, 0);
 }
 
 #ifndef NDA_RTA
