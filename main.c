@@ -345,7 +345,9 @@ static void relay_arp_request(struct relayd_interface *from_rif, struct arp_pack
 			continue;
 
 		memcpy(reqpkt.eth.ether_shost, rif->sll.sll_addr, ETH_ALEN);
+		memset(reqpkt.eth.ether_dhost, 0xff, ETH_ALEN);
 		memcpy(reqpkt.arp.arp_sha, rif->sll.sll_addr, ETH_ALEN);
+		memset(reqpkt.arp.arp_tha, 0, ETH_ALEN);
 
 		DPRINTF(2, "%s: sending ARP who-has "IP_FMT", tell "IP_FMT" ("MAC_FMT")\n",
 			rif->ifname, IP_BUF(reqpkt.arp.arp_tpa),
