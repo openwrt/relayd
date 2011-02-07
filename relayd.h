@@ -32,8 +32,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "uloop.h"
-#include "list.h"
+#include <libubox/uloop.h>
+#include <libubox/list.h>
 
 #define DEBUG
 #ifdef DEBUG
