@@ -27,7 +27,6 @@
 
 #include <linux/if_packet.h>
 #include <linux/rtnetlink.h>
-#include <linux/neighbour.h>
 
 #include <stdint.h>
 #include <stdbool.h>
