@@ -586,7 +586,7 @@ static int init_interface(struct relayd_interface *rif)
 	}
 
 #ifdef PACKET_RECV_TYPE
-	pkt_type = (1 << PACKET_BROADCAST);
+	pkt_type = (1 << PACKET_BROADCAST) | (1 << PACKET_MULTICAST);
 	setsockopt(fd, SOL_PACKET, PACKET_RECV_TYPE, &pkt_type, sizeof(pkt_type));
 #endif
 
