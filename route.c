@@ -94,10 +94,11 @@ rtnl_rule_request(struct relayd_interface *rif, int flags)
 		strcpy(req.dev.ifname, ifname);
 		req.dev.rta.rta_len = sizeof(req.dev.rta) + strlen(ifname) + 1;
 	} else {
+		uint32_t val = 1;
 		req.dev.rta.rta_type = FRA_PRIORITY;
 		req.dev.rta.rta_len = sizeof(req.dev.rta) + sizeof(uint32_t);
 		padding -= sizeof(uint32_t);
-		*((uint32_t *) &req.dev.ifname) = 1;
+		memcpy(&req.dev.ifname, &val, sizeof(val));
 	}
 	req.table.table = get_route_table(rif);
 	req.nl.nlmsg_len = sizeof(req) - padding;
