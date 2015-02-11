@@ -670,9 +670,7 @@ static void die(int signo)
 	 * When we hit SIGTERM, clean up interfaces directly, so that we
 	 * won't leave our routing in an invalid state.
 	 */
-	cleanup_hosts();
-	free_interfaces();
-	exit(1);
+	uloop_end();
 }
 
 static int usage(const char *progname)
