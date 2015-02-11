@@ -252,6 +252,7 @@ static void send_arp_reply(struct relayd_interface *rif, const uint8_t spa[4],
 static void host_entry_timeout(struct uloop_timeout *timeout)
 {
 	struct relayd_host *host = container_of(timeout, struct relayd_host, timeout);
+	struct relayd_interface *rif;
 
 	/*
 	 * When a host is behind a managed interface, we must not expire its host
@@ -261,7 +262,9 @@ static void host_entry_timeout(struct uloop_timeout *timeout)
 	 * giving up on it.
 	 */
 	if (host->rif->managed && host->cleanup_pending < host_ping_tries) {
-		send_arp_request(host->rif, host->ipaddr);
+		list_for_each_entry(rif, &interfaces, list) {
+			send_arp_request(rif, host->ipaddr);
+		}
 		host->cleanup_pending++;
 		uloop_timeout_set(&host->timeout, 1000);
 		return;
