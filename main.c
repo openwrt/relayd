@@ -719,7 +719,7 @@ int main(int argc, char **argv)
 	local_route_table = 0;
 	uloop_init();
 
-	while ((ch = getopt(argc, argv, "I:i:t:BDdT:G:R:L:")) != -1) {
+	while ((ch = getopt(argc, argv, "I:i:t:p:BDdT:G:R:L:")) != -1) {
 		switch(ch) {
 		case 'I':
 			managed = true;
