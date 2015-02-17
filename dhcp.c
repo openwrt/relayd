@@ -115,7 +115,7 @@ parse_dhcp_options(struct relayd_host *host, struct dhcp_header *dhcp, int len)
 	}
 }
 
-bool relayd_handle_dhcp_packet(struct relayd_interface *rif, void *data, int len, bool forward)
+bool relayd_handle_dhcp_packet(struct relayd_interface *rif, void *data, int len, bool forward, bool parse)
 {
 	struct ip_packet *pkt = data;
 	struct udphdr *udp;
@@ -151,7 +151,7 @@ bool relayd_handle_dhcp_packet(struct relayd_interface *rif, void *data, int len
 
 	if (dhcp->op == 2) {
 		host = relayd_refresh_host(rif, pkt->eth.ether_shost, (void *) &pkt->iph.saddr);
-		if (host)
+		if (host && parse)
 			parse_dhcp_options(host, dhcp, udplen - sizeof(struct udphdr));
 	}
 

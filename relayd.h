@@ -127,6 +127,6 @@ void relayd_add_host_route(struct relayd_host *host, const uint8_t *ipaddr, uint
 void relayd_add_pending_route(const uint8_t *gateway, const uint8_t *dest, uint8_t mask, int timeout);
 
 void relayd_forward_bcast_packet(struct relayd_interface *from_rif, void *packet, int len);
-bool relayd_handle_dhcp_packet(struct relayd_interface *rif, void *data, int len, bool forward);
+bool relayd_handle_dhcp_packet(struct relayd_interface *rif, void *data, int len, bool forward, bool parse);
 
 #endif

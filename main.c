@@ -40,6 +40,7 @@ static int host_ping_tries;
 static int inet_sock;
 static int forward_bcast;
 static int forward_dhcp;
+static int parse_dhcp;
 
 uint8_t local_addr[4];
 int local_route_table;
@@ -507,7 +508,7 @@ static void recv_bcast_packet(struct uloop_fd *fd, unsigned int events)
 		if (!forward_bcast && !forward_dhcp)
 			continue;
 
-		if (relayd_handle_dhcp_packet(rif, pktbuf, pktlen, forward_dhcp))
+		if (relayd_handle_dhcp_packet(rif, pktbuf, pktlen, forward_dhcp, parse_dhcp))
 			continue;
 
 		if (forward_bcast)
@@ -690,6 +691,7 @@ static int usage(const char *progname)
 			"	-T <table>	Set routing table number for automatically added routes\n"
 			"	-B		Enable broadcast forwarding\n"
 			"	-D		Enable DHCP forwarding\n"
+			"	-P		Disable DHCP options parsing\n"
 			"	-L <ipaddr>	Enable local access using <ipaddr> as source address\n"
 			"\n",
 		progname);
@@ -718,9 +720,10 @@ int main(int argc, char **argv)
 	host_ping_tries = 5;
 	forward_bcast = 0;
 	local_route_table = 0;
+	parse_dhcp = 1;
 	uloop_init();
 
-	while ((ch = getopt(argc, argv, "I:i:t:p:BDdT:G:R:L:")) != -1) {
+	while ((ch = getopt(argc, argv, "I:i:t:p:BDPdT:G:R:L:")) != -1) {
 		switch(ch) {
 		case 'I':
 			managed = true;
@@ -751,6 +754,9 @@ int main(int argc, char **argv)
 			break;
 		case 'D':
 			forward_dhcp = 1;
+			break;
+		case 'P':
+			parse_dhcp = 0;
 			break;
 		case 'T':
 			route_table = atoi(optarg);
