@@ -371,7 +371,7 @@ static void rtnl_dump_request(int nlmsg_type)
 
 int relayd_rtnl_init(void)
 {
-	struct sockaddr_nl snl_local;
+	struct sockaddr_nl snl_local = {};
 
 	rtnl_sock.fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
 	if (rtnl_sock.fd < 0) {
