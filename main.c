@@ -703,7 +703,7 @@ int main(int argc, char **argv)
 	struct relayd_interface *rif = NULL;
 	struct in_addr addr, addr2;
 	bool local_addr_valid = false;
-	bool managed;
+	bool managed = false;
 	int ifnum = 0;
 	char *s, *s2;
 	int mask;
