@@ -165,7 +165,7 @@ static void send_arp_request(struct relayd_interface *rif, const uint8_t *ipaddr
 	fill_arp_packet(&pkt, rif, rif->src_ip, ipaddr);
 
 	pkt.arp.arp_op = htons(ARPOP_REQUEST);
-	memcpy(pkt.arp.arp_spa, rif->src_ip, ETH_ALEN);
+	memcpy(pkt.arp.arp_spa, rif->src_ip, sizeof(pkt.arp.arp_spa));
 	memset(pkt.arp.arp_tha, 0, ETH_ALEN);
 	memset(pkt.eth.ether_dhost, 0xff, ETH_ALEN);
 
