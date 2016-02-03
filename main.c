@@ -653,6 +653,11 @@ static struct relayd_interface *alloc_interface(const char *ifname, bool managed
 	if (strlen(ifname) >= IFNAMSIZ)
 		return NULL;
 
+	list_for_each_entry(rif, &interfaces, list) {
+		if (!strncmp(rif->ifname, ifname, IFNAMSIZ))
+			return rif;
+	}
+
 	rif = calloc(1, sizeof(*rif));
 	if (!rif)
 		return NULL;
