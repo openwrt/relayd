@@ -68,6 +68,10 @@ rtnl_rule_request(struct relayd_interface *rif, int flags)
 		} __packed table;
 		struct {
 			struct rtattr rta;
+			int prio;
+		} __packed prio;
+		struct {
+			struct rtattr rta;
 			char ifname[IFNAMSIZ + 1];
 		} __packed dev;
 	} __packed req = {
@@ -76,6 +80,11 @@ rtnl_rule_request(struct relayd_interface *rif, int flags)
 			.rtm_table = RT_TABLE_UNSPEC,
 			.rtm_scope = RT_SCOPE_UNIVERSE,
 			.rtm_protocol = RTPROT_BOOT,
+		},
+		.prio = {
+			.rta.rta_type = FRA_PRIORITY,
+			.rta.rta_len = sizeof(req.prio),
+			.prio = 2,
 		},
 		.table.rta = {
 			.rta_type = FRA_TABLE,
@@ -94,11 +103,8 @@ rtnl_rule_request(struct relayd_interface *rif, int flags)
 		strcpy(req.dev.ifname, ifname);
 		req.dev.rta.rta_len = sizeof(req.dev.rta) + strlen(ifname) + 1;
 	} else {
-		uint32_t val = 1;
-		req.dev.rta.rta_type = FRA_PRIORITY;
-		req.dev.rta.rta_len = sizeof(req.dev.rta) + sizeof(uint32_t);
-		padding -= sizeof(uint32_t);
-		memcpy(&req.dev.ifname, &val, sizeof(val));
+		padding = sizeof(req.dev);
+		req.prio.prio--;
 	}
 	req.table.table = get_route_table(rif);
 	req.nl.nlmsg_len = sizeof(req) - padding;
