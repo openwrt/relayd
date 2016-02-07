@@ -27,6 +27,9 @@
 
 #include "relayd.h"
 
+#define NLMSG_ALIGNTO        4U
+#define NLMSG_ALIGN(len) ( ((len)+NLMSG_ALIGNTO-1) & ~(NLMSG_ALIGNTO-1) )
+
 static struct uloop_fd rtnl_sock;
 static unsigned int rtnl_seq, rtnl_dump_seq;
 int route_table = 16800;
@@ -98,10 +101,11 @@ rtnl_rule_request(struct relayd_interface *rif, int flags)
 		ifname = rif->ifname;
 
 	if (!(flags & RULE_F_DEFGW_WORKAROUND)) {
+		int len = strlen(ifname) + 1;
 		req.dev.rta.rta_type = FRA_IFNAME;
-		padding -= strlen(ifname) + 1;
+		padding -= NLMSG_ALIGN(len);
 		strcpy(req.dev.ifname, ifname);
-		req.dev.rta.rta_len = sizeof(req.dev.rta) + strlen(ifname) + 1;
+		req.dev.rta.rta_len = sizeof(req.dev.rta) + len;
 	} else {
 		padding = sizeof(req.dev);
 		req.prio.prio--;
