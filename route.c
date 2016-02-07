@@ -62,7 +62,7 @@ static int get_route_table(struct relayd_interface *rif)
 static void
 rtnl_rule_request(struct relayd_interface *rif, int flags)
 {
-	static struct {
+	struct {
 		struct nlmsghdr nl;
 		struct rtmsg rt;
 		struct {
