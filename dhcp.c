@@ -88,8 +88,9 @@ parse_dhcp_options(struct relayd_host *host, struct dhcp_header *dhcp, int len)
 	struct dhcp_option *opt = (void *)dhcp->option_data;
 	static const uint8_t dest[4] = { 0, 0, 0, 0 };
 
-	while((uint8_t *) opt < end) {
-		if ((uint8_t *) opt + opt->len > end)
+	while((uint8_t *) opt  + sizeof(*opt) < end) {
+		if ((uint8_t *) opt + opt->len > end ||
+		    (uint8_t *) opt + sizeof(*opt) > end )
 			break;
 
 		opt = (void *) &opt->data[opt->len];
@@ -135,6 +136,9 @@ bool relayd_handle_dhcp_packet(struct relayd_interface *rif, void *data, int len
 
 	udp = (void *) ((char *) &pkt->iph + (pkt->iph.ihl << 2));
 	dhcp = (void *) (udp + 1);
+
+	if ((uint8_t *)udp + sizeof(*udp) > (uint8_t *)data + len )
+		return false;
 
 	udplen = ntohs(udp->len);
 	if (udplen > len - ((char *) udp - (char *) data))
