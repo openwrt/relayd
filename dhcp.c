@@ -94,6 +94,8 @@ parse_dhcp_options(struct relayd_host *host, struct dhcp_header *dhcp, int len)
 			break;
 
 		opt = (void *) &opt->data[opt->len];
+		if ((uint8_t *) opt + sizeof(*opt) > end )
+			break;
 		switch(opt->code) {
 		case DHCP_OPTION_ROUTER:
 			DPRINTF(2, "Found a DHCP router option, len=%d\n", opt->len);
@@ -137,7 +139,8 @@ bool relayd_handle_dhcp_packet(struct relayd_interface *rif, void *data, int len
 	udp = (void *) ((char *) &pkt->iph + (pkt->iph.ihl << 2));
 	dhcp = (void *) (udp + 1);
 
-	if ((uint8_t *)udp + sizeof(*udp) > (uint8_t *)data + len )
+	if ((uint8_t *)udp  + sizeof(*udp)  > (uint8_t *)data + len ||
+	    (uint8_t *)dhcp + sizeof(*dhcp) > (uint8_t *)data + len)
 		return false;
 
 	udplen = ntohs(udp->len);
