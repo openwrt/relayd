@@ -36,13 +36,16 @@ int route_table = 16800;
 
 static void rtnl_flush(void)
 {
+	ssize_t ret;
 	int fd;
 
 	fd = open("/proc/sys/net/ipv4/route/flush", O_WRONLY);
 	if (fd < 0)
 		return;
 
-	write(fd, "-1", 2);
+	ret = write(fd, "-1", 2);
+	if (ret != 2)
+		perror("write");
 	close(fd);
 }
 
