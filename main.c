@@ -177,6 +177,31 @@ static void send_arp_request(struct relayd_interface *rif, const uint8_t *ipaddr
 		(struct sockaddr *) &rif->sll, sizeof(rif->sll));
 }
 
+static void send_arp_request_directed(struct relayd_host *host)
+{
+	const uint8_t zero_mac[ETH_ALEN] = { 0 };
+	struct relayd_interface *rif = host->rif;
+	struct arp_packet pkt;
+
+	if (!memcmp(host->lladdr, zero_mac, ETH_ALEN) ||
+	    (host->lladdr[0] & 1))
+		return;
+
+	fill_arp_packet(&pkt, rif, rif->src_ip, host->ipaddr);
+
+	pkt.arp.arp_op = htons(ARPOP_REQUEST);
+	memcpy(pkt.eth.ether_dhost, host->lladdr, ETH_ALEN);
+	memset(pkt.arp.arp_tha, 0, ETH_ALEN);
+
+	DPRINTF(2, "%s: sending directed ARP who-has "IP_FMT
+		", tell "IP_FMT" ("MAC_FMT")\n",
+		rif->ifname, IP_BUF(pkt.arp.arp_tpa),
+		IP_BUF(pkt.arp.arp_spa), MAC_BUF(pkt.eth.ether_shost));
+
+	sendto(rif->fd.fd, &pkt, sizeof(pkt), 0,
+		(struct sockaddr *) &rif->sll, sizeof(rif->sll));
+}
+
 void relayd_add_pending_route(const uint8_t *gateway, const uint8_t *dest, uint8_t mask, int timeout)
 {
 	struct relayd_pending_route *rt;
@@ -266,6 +291,7 @@ static void host_entry_timeout(struct uloop_timeout *timeout)
 		list_for_each_entry(rif, &interfaces, list) {
 			send_arp_request(rif, host->ipaddr);
 		}
+		send_arp_request_directed(host);
 		host->cleanup_pending++;
 		uloop_timeout_set(&host->timeout, 1000);
 		return;
