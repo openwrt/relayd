@@ -55,6 +55,19 @@ struct dhcp_header {
 	uint8_t option_data[];
 } __packed;
 
+static bool
+dhcp_reply_has_unicast_chaddr(const struct dhcp_header *dhcp)
+{
+	static const uint8_t zero_mac[ETH_ALEN];
+
+	return dhcp->op == 2 &&
+	       dhcp->htype == ARPHRD_ETHER &&
+	       dhcp->hlen == ETH_ALEN &&
+	       dhcp->yiaddr.s_addr != INADDR_ANY &&
+	       memcmp(dhcp->chaddr, zero_mac, ETH_ALEN) &&
+	       !(dhcp->chaddr[0] & 1);
+}
+
 static uint16_t
 chksum(uint16_t sum, const uint8_t *data, uint16_t len)
 {
@@ -165,6 +178,12 @@ bool relayd_handle_dhcp_packet(struct relayd_interface *rif, void *data, int len
 	DPRINTF(2, "%s: handling DHCP %s\n", rif->ifname, (dhcp->op == 1 ? "request" : "response"));
 
 	dhcp->flags |= htons(DHCP_FLAG_BROADCAST);
+
+	if (udp->source == htons(67) &&
+	    udp->dest == htons(68) &&
+	    !memcmp(pkt->eth.ether_dhost, "\xff\xff\xff\xff\xff\xff", ETH_ALEN) &&
+	    dhcp_reply_has_unicast_chaddr(dhcp))
+		memcpy(pkt->eth.ether_dhost, dhcp->chaddr, ETH_ALEN);
 
 	udp->check = 0;
 	sum = udplen + IPPROTO_UDP;
