@@ -42,6 +42,11 @@ static int forward_bcast;
 static int forward_dhcp;
 static int parse_dhcp;
 
+static void ping_static_routes(struct uloop_timeout *timeout);
+static struct uloop_timeout static_routes_timeout = {
+	.cb = ping_static_routes,
+};
+
 uint8_t local_addr[4];
 int local_route_table;
 
@@ -124,6 +129,7 @@ void relayd_add_host_route(struct relayd_host *host, const uint8_t *dest, uint8_
 static void del_host(struct relayd_host *host)
 {
 	struct relayd_route *route, *tmp;
+	struct relayd_pending_route *rt;
 
 	DPRINTF(1, "%s: deleting host "IP_FMT" ("MAC_FMT")\n", host->rif->ifname,
 		IP_BUF(host->ipaddr), MAC_BUF(host->lladdr));
@@ -135,6 +141,10 @@ static void del_host(struct relayd_host *host)
 	}
 	if (host->rif->managed)
 		relayd_del_route(host, NULL);
+	list_for_each_entry(rt, &pending_routes, rt.list) {
+		if (!rt->timeout.cb && !memcmp(rt->gateway, host->ipaddr, 4))
+			uloop_timeout_set(&static_routes_timeout, 1000);
+	}
 	uloop_timeout_cancel(&host->timeout);
 	list_del(&host->list);
 	free(host);
@@ -158,10 +168,25 @@ static void fill_arp_packet(struct arp_packet *pkt, struct relayd_interface *rif
 	pkt->arp.arp_pln = 4;
 }
 
+static void update_interface_ipaddr(struct relayd_interface *rif)
+{
+	struct sockaddr_in *sin;
+	struct ifreq ifr = {};
+
+	strcpy(ifr.ifr_name, rif->ifname);
+	if (ioctl(inet_sock, SIOCGIFADDR, &ifr) < 0) {
+		memcpy(rif->src_ip, DUMMY_IP, sizeof(rif->src_ip));
+	} else {
+		sin = (struct sockaddr_in *) &ifr.ifr_addr;
+		memcpy(rif->src_ip, &sin->sin_addr.s_addr, sizeof(rif->src_ip));
+	}
+}
+
 static void send_arp_request(struct relayd_interface *rif, const uint8_t *ipaddr)
 {
 	struct arp_packet pkt;
 
+	update_interface_ipaddr(rif);
 	fill_arp_packet(&pkt, rif, rif->src_ip, ipaddr);
 
 	pkt.arp.arp_op = htons(ARPOP_REQUEST);
@@ -326,6 +351,7 @@ static void send_gratuitous_arp(struct relayd_interface *rif, const uint8_t *spa
 struct relayd_host *relayd_refresh_host(struct relayd_interface *rif, const uint8_t *lladdr, const uint8_t *ipaddr)
 {
 	struct relayd_host *host;
+	struct relayd_route *route;
 
 	host = find_host_by_ipaddr(rif, ipaddr);
 	if (!host) {
@@ -347,6 +373,13 @@ struct relayd_host *relayd_refresh_host(struct relayd_interface *rif, const uint
 	} else {
 		host->cleanup_pending = false;
 		uloop_timeout_set(&host->timeout, host_timeout * 1000);
+		/* An address change may have flushed the gateway's kernel routes. */
+		if (!list_empty(&host->routes)) {
+			if (rif->managed)
+				relayd_add_route(host, NULL);
+			list_for_each_entry(route, &host->routes, list)
+				relayd_add_route(host, route);
+		}
 		send_gratuitous_arp(rif, ipaddr);
 	}
 
@@ -520,7 +553,6 @@ static void recv_bcast_packet(struct uloop_fd *fd, unsigned int events)
 static int init_interface(struct relayd_interface *rif)
 {
 	struct sockaddr_ll *sll = &rif->sll;
-	struct sockaddr_in *sin;
 	struct ifreq ifr;
 	int fd = rif->fd.fd;
 #ifdef PACKET_RECV_TYPE
@@ -555,12 +587,7 @@ static int init_interface(struct relayd_interface *rif)
 
 	sll->sll_ifindex = ifr.ifr_ifindex;
 
-	if (ioctl(fd, SIOCGIFADDR, &ifr) < 0) {
-		memcpy(rif->src_ip, DUMMY_IP, sizeof(rif->src_ip));
-	} else {
-		sin = (struct sockaddr_in *) &ifr.ifr_addr;
-		memcpy(rif->src_ip, &sin->sin_addr.s_addr, sizeof(rif->src_ip));
-	}
+	update_interface_ipaddr(rif);
 
 	if (bind(fd, (struct sockaddr *)sll, sizeof(struct sockaddr_ll)) < 0) {
 		perror("bind(ETH_P_ARP)");
@@ -599,14 +626,22 @@ static int init_interface(struct relayd_interface *rif)
 	return 0;
 }
 
-static void ping_static_routes(void)
+static void ping_static_routes(struct uloop_timeout *timeout)
 {
 	struct relayd_pending_route *rt;
 	struct relayd_interface *rif;
+	bool pending = false;
 
-	list_for_each_entry(rt, &pending_routes, rt.list)
+	list_for_each_entry(rt, &pending_routes, rt.list) {
+		if (rt->timeout.cb || find_host_by_ipaddr(NULL, rt->gateway))
+			continue;
+
+		pending = true;
 		list_for_each_entry(rif, &interfaces, list)
 			send_arp_request(rif, rt->gateway);
+	}
+	if (pending)
+		uloop_timeout_set(timeout, 1000);
 }
 
 static int init_interfaces(void)
@@ -841,12 +876,13 @@ int main(int argc, char **argv)
 	if (init_interfaces() < 0)
 		return 1;
 
-	ping_static_routes();
+	ping_static_routes(&static_routes_timeout);
 
 	uloop_run();
 	uloop_done();
 
 	cleanup_hosts();
+	uloop_timeout_cancel(&static_routes_timeout);
 	free_interfaces();
 	relayd_rtnl_done();
 	close(inet_sock);
